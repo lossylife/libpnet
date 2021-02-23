@@ -62,6 +62,8 @@ pub struct Config {
 
     /// Specifies packet fanout option, if desired. Defaults to None.
     pub fanout: Option<super::FanoutOption>,
+
+    pub qdisc_bypass: bool,
 }
 
 impl<'a> From<&'a super::Config> for Config {
@@ -73,6 +75,7 @@ impl<'a> From<&'a super::Config> for Config {
             read_timeout: config.read_timeout,
             write_timeout: config.write_timeout,
             fanout: config.linux_fanout,
+            qdisc_bypass: config.qdisc_bypass,
         }
     }
 }
@@ -86,6 +89,7 @@ impl Default for Config {
             write_timeout: None,
             channel_type: super::ChannelType::Layer2,
             fanout: None,
+            qdisc_bypass: false,
         }
     }
 }
@@ -115,6 +119,29 @@ pub fn channel(network_interface: &NetworkInterface, config: Config) -> io::Resu
         }
         return Err(err);
     }
+
+    // set QDISC_BYPASS
+    {
+        let arg: libc::c_uint = config.qdisc_bypass as u32;
+        if unsafe {
+            libc::setsockopt(
+                socket,
+                linux::SOL_PACKET,
+                linux::PACKET_QDISC_BYPASS,
+                (&arg as *const libc::c_uint) as *const libc::c_void,
+                mem::size_of::<libc::c_uint>() as u32,
+                )
+        } == -1
+        {
+            let err = io::Error::last_os_error();
+            unsafe {
+                pnet_sys::close(socket);
+            }
+            return Err(err);
+        }
+    }
+
+
 
     let mut pmr: linux::packet_mreq = unsafe { mem::zeroed() };
     pmr.mr_ifindex = network_interface.index as i32;
@@ -284,6 +311,7 @@ impl DataLinkSender for DataLinkSenderImpl {
 
     #[inline]
     fn send_to(&mut self, packet: &[u8], _dst: Option<NetworkInterface>) -> Option<io::Result<()>> {
+        /*
         unsafe {
             libc::FD_ZERO(&mut self.fd_set as *mut libc::fd_set);
             libc::FD_SET(self.socket.fd, &mut self.fd_set as *mut libc::fd_set);
@@ -306,6 +334,7 @@ impl DataLinkSender for DataLinkSenderImpl {
         } else if ret == 0 {
             Some(Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out")))
         } else {
+        */
             match pnet_sys::send_to(
                 self.socket.fd,
                 packet,
@@ -315,7 +344,9 @@ impl DataLinkSender for DataLinkSenderImpl {
                 Err(e) => Some(Err(e)),
                 Ok(_) => Some(Ok(())),
             }
+            /*
         }
+        */
     }
 }
 
